@@ -33,6 +33,23 @@
 | **图5** | Selector训练过程 - Epsilon衰减与Q表增长 | Selector Training Process - Epsilon Decay & Q-table Growth |
 | **图6** | 专家激活模式与威胁演化（Meander-100场景） | Expert Activation Pattern with Threat Evolution (Meander-100 Scenario) |
 
+### 🔍 附加对比图（vs_cardiff）
+
+为配合新型红队智能体实验，`vs_cardiff/figures/` 目录新增两张成对的中英文对比图：
+
+| 图号 | 中文标题 | English Title | 说明 |
+|------|---------|---------------|------|
+| **附图A** | DeceptiveRedAgent欺骗攻击下的防御表现对比 | Defensive Performance vs. DeceptiveRedAgent | 比较我们的模型与Cardiff冠军在30/50/100步场景下的平均奖励与标准差，显示我们模型稳定领先。 |
+| **附图B** | SleepDeceptiveRedAgent潜伏攻击下的防御表现对比 | Defensive Performance vs. SleepDeceptiveRedAgent | 采用对数坐标展示平均奖励绝对值，凸显Cardiff在潜伏型欺骗面前损失指数级攀升，而我们模型保持稳定。 |
+
+**文件位置**：
+- 中文版：`vs_cardiff/figures/zh/deceptive_comparison.png`、`vs_cardiff/figures/zh/sleep_deceptive_comparison.png`
+- 英文版：`vs_cardiff/figures/en/deceptive_comparison.png`、`vs_cardiff/figures/en/sleep_deceptive_comparison.png`
+
+**阅读建议**：
+- 附图A 对应文档核心发现“Deceptive场景优势倍数 3.1×→6.4×”。
+- 附图B 支持“SleepDeceptive 场景优势 34.8×”及“Cardiff 指纹识别失效”结论。
+
 ### ⚙️ 关于威胁评估的说明
 
 **决策系统**：我们的模型使用**Q-learning Selector**进行子网选择决策
