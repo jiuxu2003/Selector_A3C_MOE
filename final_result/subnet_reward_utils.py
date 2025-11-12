@@ -1,5 +1,5 @@
 """
-子网奖励隔离工具 - Phase 9L
+子网奖励隔离工具
 每个Expert只关心自己子网的奖励/惩罚
 """
 
@@ -242,7 +242,7 @@ class SubnetRewardCalculator:
                                prev_metrics_dict: Dict,
                                last_analyse_state: Optional[Dict] = None) -> float:
         """
-        Phase 9L: 计算子网的训练奖励（只用子网塑形奖励）
+        计算子网的训练奖励（只用子网塑形奖励）
         
         核心逻辑：
         - 训练时：只使用子网的God-view塑形奖励
@@ -259,7 +259,7 @@ class SubnetRewardCalculator:
         Returns:
             子网塑形奖励（用于训练）
         """
-        # Phase 9L: 只使用子网塑形奖励进行训练
+        # 只使用子网塑形奖励进行训练
         # 环境原始奖励仅用于console显示，不参与训练
         subnet_shaped_reward = self.calculate_subnet_shaped_reward(
             action, action_type, env, subnet_name, 

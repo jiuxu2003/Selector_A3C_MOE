@@ -1,5 +1,5 @@
 """
-硬编码子网选择器 - Phase 9L
+硬编码子网选择器
 基于威胁分数逻辑直接判断调用哪个子网Expert
 """
 
@@ -37,7 +37,7 @@ class HardcodedSelector:
         """
         根据观察计算各子网威胁分数，选择最需要防御的子网
         
-        Phase 9L改进：严格的优先级逻辑
+        严格的优先级逻辑：
         - 只要高优先级子网有威胁，就优先防御它
         - 优先级：Operational > Enterprise > User
         
@@ -45,7 +45,7 @@ class HardcodedSelector:
         1. 如果Op有威胁 → 选Op
         2. 否则，如果Enterprise有威胁 → 选Enterprise
         3. 否则，如果User有威胁 → 选User
-        4. 都无威胁 → 默认巡逻Op
+        4. 都无威胁 → 默认巡逻User（Red的入口点）
         
         Args:
             observation: CybORG观察字典（包含所有主机信息）
@@ -60,8 +60,7 @@ class HardcodedSelector:
             'Operational': self._calculate_operational_threat(observation)
         }
         
-        # Phase 9L改进：严格的优先级逻辑
-        # 按优先级顺序检查，只要有威胁就选择
+        # 严格的优先级逻辑：按优先级顺序检查，只要有威胁就选择
         if threat_scores['Operational'] > 0:
             selected_subnet = 'Operational'
         elif threat_scores['Enterprise'] > 0:
@@ -82,8 +81,6 @@ class HardcodedSelector:
         """
         选择子网并返回详细的威胁分数（用于调试和分析）
         
-        Phase 9L改进：严格的优先级逻辑
-        
         Args:
             observation: CybORG观察字典
             
@@ -96,8 +93,7 @@ class HardcodedSelector:
             'Operational': self._calculate_operational_threat(observation)
         }
         
-        # Phase 9L改进：严格的优先级逻辑
-        # 按优先级顺序检查，只要有威胁就选择
+        # 严格的优先级逻辑：按优先级顺序检查，只要有威胁就选择
         if threat_scores['Operational'] > 0:
             selected_subnet = 'Operational'
         elif threat_scores['Enterprise'] > 0:
@@ -124,7 +120,7 @@ class HardcodedSelector:
         
         **重要**：User0被排除，因为：
         - User0是Red的persistent foothold（无法清除）
-        - User0的动作已从动作空间移除（Phase 9K）
+        - User0的动作已从动作空间移除
         - 不应该因为无法防御的威胁被惩罚
         
         Args:

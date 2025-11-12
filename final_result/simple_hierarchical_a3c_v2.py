@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Phase 9L: 简化分层A3C智能体 v2
-核心改进：
-1. 移除Q-learning Selector → 使用硬编码威胁分数选择器
-2. 子网观察空间分离：User(24维), Enterprise(16维), Operational(20维)
+简化分层A3C智能体 v2
+核心特性：
+1. 使用硬编码威胁分数选择器
+2. 子网观察空间分离：User(20维), Enterprise(16维), Operational(20维)
 3. 子网奖励隔离：每个Expert只关心自己子网的奖励/惩罚
-4. Critic Loss权重：0.5 → 0.015
+4. Critic Loss权重：0.015
 """
 import sys
 import os
@@ -27,11 +27,11 @@ from CybORG.Shared import Results
 
 class SubnetA3CExpert(nn.Module):
     """
-    Phase 9L: 子网A3C专家 v2
+    子网A3C专家 v2
     
-    核心改进：
-    1. 支持子网独立观察空间维度（不再是全局52维）
-    2. 每个子网有自己的观察维度：User(24), Enterprise(16), Operational(20)
+    核心特性：
+    1. 支持子网独立观察空间维度
+    2. 每个子网有自己的观察维度：User(20), Enterprise(16), Operational(20)
     """
     
     def __init__(self, subnet_name: str, host_indices: List[int], action_dim: int, 
@@ -43,16 +43,14 @@ class SubnetA3CExpert(nn.Module):
         self.action_dim = action_dim
         self.device = device
         
-        # Phase 9L: 使用子网独立观察空间维度
-        # 如果未指定，则使用旧的计算方式（向后兼容）
+        # 使用子网独立观察空间维度
         if obs_dim is not None:
             self.input_dim = obs_dim
         else:
-            # 旧方式：监控主机数 × 4特征
+            # 默认：监控主机数 × 4特征
             self.input_dim = len(host_indices) * 4
         
-        # Phase 3B: 匹配数据复杂度的网络架构（还原原始设计）
-        # 共享底层 + 独立head（适合A3C）
+        # 网络架构：共享底层 + 独立head（适合A3C）
         self.shared_layers = nn.Sequential(
             nn.Linear(self.input_dim, 64),
             nn.ReLU(),
@@ -68,13 +66,13 @@ class SubnetA3CExpert(nn.Module):
         self.to(device)
         self.apply(self._init_weights)
         
-        # Phase 4A: 差异化子网超参数
+        # 子网超参数
         self._setup_subnet_hyperparams()
         
         # 子网特定的防御策略参数
         self._setup_defense_strategy()
         
-        # Phase 5: action_indices会在_initialize_experts中设置
+        # action_indices会在_initialize_experts中设置
         # 此时先初始化为空，稍后调用setup_action_types
         self.action_indices = []
         self.action_types = {}
@@ -82,34 +80,31 @@ class SubnetA3CExpert(nn.Module):
     
     def _setup_subnet_hyperparams(self):
         """
-        Phase 9F: 统一超参数（动作集已简化且对等）
+        统一超参数配置
         
-        核心改进：
+        核心特性：
         1. 三个子网动作数相近（14-17个）→ 学习率统一
-        2. 参考PPO/A3C经验：lr=3e-4是常见选择
-        3. 保留适度的熵系数差异（鼓励不同探索策略）
+        2. 参考PPO/A3C经验：lr=8e-4
+        3. 统一的熵系数（鼓励探索）
         """
-        # Phase 9L: 统一学习率为8e-4
-        # 所有子网使用相同的学习率以保证训练一致性
-        self.expert_lr = 8e-4  # 统一学习率
+        # 统一学习率
+        self.expert_lr = 8e-4
         
         # 统一批次大小
-        self.expert_batch_size = 64  # 标准batch size
+        self.expert_batch_size = 64
         
-        # Phase 9K: 统一并提高熵系数（所有子网都需要探索复杂场景）
-        # 混合场景（30/50/100步 + Meander/B-line）需要更多探索
-        self.entropy_coef = 0.05  # 统一提高到0.05（从0.01-0.03）
+        # 统一熵系数（所有子网都需要探索复杂场景）
+        self.entropy_coef = 0.05
         self.reward_scale = 1.0
     
     def _setup_action_mapping(self):
-        """Phase 5修复：基于真实全局索引的动作类型映射"""
-        # Phase 5: 使用action_indices（全局索引）来精确分类动作类型
-        # 不要用本地索引，而是根据全局索引判断动作类型！
+        """基于真实全局索引的动作类型映射"""
+        # 使用action_indices（全局索引）来精确分类动作类型
         
         self.action_types = {}
         
         # 全局动作范围（基于CybORG验证结果）
-        # 注意：Monitor(1)已移除，因为环境会自动执行
+        # 注意：Monitor(1)已移除，环境会自动执行
         GLOBAL_ACTION_RANGES = {
             'Sleep': [0],
             'Analyse': list(range(2, 15)),       # 2-14
@@ -136,7 +131,7 @@ class SubnetA3CExpert(nn.Module):
             
             self.action_types[action_type] = local_indices
         
-        # Phase 7: 为启发式筛选暴露各类动作列表
+        # 为启发式筛选暴露各类动作列表
         self.sleep_actions = self.action_types.get('Sleep', [])
         self.analyse_actions = self.action_types.get('Analyse', [])
         self.remove_actions = self.action_types.get('Remove', [])
@@ -198,13 +193,13 @@ class SubnetA3CExpert(nn.Module):
         for host_idx in self.host_indices:
             subnet_state.extend(obs_reshaped[host_idx])
         
-        # Phase 7: 保存子网状态供_get_candidate_actions使用
+        # 保存子网状态供_get_candidate_actions使用
         self.last_subnet_state = np.array(subnet_state)
         
         return torch.FloatTensor(subnet_state).to(self.device)
     
     def forward(self, state):
-        """还原原始forward逻辑（共享层+独立head）"""
+        """前向传播（共享层+独立head）"""
         if len(state.shape) == 1:
             state = state.unsqueeze(0)
         
@@ -253,7 +248,7 @@ class SubnetA3CExpert(nn.Module):
     
     def _get_candidate_actions(self, threat_level):
         """
-        Phase 7: 基于动作类型的智能筛选
+        基于动作类型的智能筛选
         
         核心思路：
         1. 根据威胁状态判断允许的动作类型
@@ -267,8 +262,7 @@ class SubnetA3CExpert(nn.Module):
         
         if self.subnet_name == 'Operational':
             # 运维子网：最关键，严格筛选
-            # Phase 7修复：降低威胁门限，让入侵快速触发强力防御
-            if threat_level >= 0.15:  # 高威胁（任何主机入侵都>=0.25）
+            if threat_level >= 0.15:  # 高威胁
                 # ❌ 不能Sleep/Decoy（有威胁立即处理）
                 # ✅ 只能Remove/Restore - 直接行动！
                 allowed_types = ['Remove', 'Restore']
@@ -396,19 +390,19 @@ class SubnetA3CExpert(nn.Module):
             'impact_action': 10      # 影响操作 (Impact)
         }
         
-        # Phase 9L: 处理新的观察格式（num_hosts × 4 + 4统计）
+        # 处理观察格式（num_hosts × 4 + 4统计）
         num_hosts = len(self.host_indices)
         
-        # 检查是否是Phase 9L格式（包含额外的4维统计）
+        # 检查是否包含额外的4维统计
         total_size = state.numel()
         expected_size_with_stats = num_hosts * 4 + 4
         
         if total_size == expected_size_with_stats:
-            # Phase 9L格式：提取前num_hosts×4维（主机信息）
+            # 包含统计信息：提取前num_hosts×4维（主机信息）
             host_features = state.view(-1)[:num_hosts * 4]
             state_reshaped = host_features.view(num_hosts, 4)
         else:
-            # 旧格式：直接reshape
+            # 直接reshape
             state_reshaped = state.view(num_hosts, 4)
         
         total_threat_score = 0.0
@@ -448,11 +442,10 @@ class SubnetA3CExpert(nn.Module):
     
     def shape_reward(self, base_reward, action_taken, threat_level, prev_threat=None):
         """
-        Phase 1增强：基于威胁量化的A3C奖励塑造
+        基于威胁量化的A3C奖励塑造
         1. 保持原始环境奖励为主要信号
         2. 根据威胁门槛和子网策略添加奖励调整
         3. 鼓励A3C学会威胁感知的防御决策
-        4. 新增：威胁降低奖励（鼓励有效防御）
         """
         shaped_reward = base_reward  # 环境奖励是主要信号
         
@@ -462,58 +455,49 @@ class SubnetA3CExpert(nn.Module):
         # 威胁门槛策略奖励
         strategy_bonus = 0.0
         
-        # Phase 7关键修复：完全移除威胁变化奖励
-        # 原因：威胁变化受Red Agent随机性影响，引入巨大方差
-        #       导致Critic Loss爆炸（User:20万, Enterprise:3.3万）
-        # 
-        # ❌ 威胁降低≠动作有效（可能是Red没攻击）
-        # ❌ 威胁上升≠动作无效（可能是Red同时攻击多台）
-        # ✅ 只用确定性的strategy bonus，基于动作类型
-        #
-        # if prev_threat is not None:
-        #     threat_reduction = prev_threat - threat_level
-        #     strategy_bonus += threat_reduction * coef  # 移除！
+        # 注意：威胁变化受Red Agent随机性影响，引入巨大方差
+        # 威胁降低≠动作有效（可能是Red没攻击）
+        # 威胁上升≠动作无效（可能是Red同时攻击多台）
+        # 只用确定性的strategy bonus，基于动作类型
         
         if self.subnet_name == 'User':
-            # Phase 7: User子网奖励强化（适度，避免掩盖环境信号）
-            # 目标：引导而非主导
+            # User子网奖励强化（适度，避免掩盖环境信号）
             if threat_level < 0.3:  # 低威胁时
                 if action_type in ['Sleep', 'DecoyApache', 'DecoySSHD', 'DecoyTomcat']:
-                    strategy_bonus += 0.8  # 适度提高（从0.5）
+                    strategy_bonus += 0.8
                 elif action_type == 'Remove':
-                    strategy_bonus += 0.5  # 适度提高（从0.3）
+                    strategy_bonus += 0.5
             else:  # 高威胁时
                 if action_type == 'Remove':
-                    strategy_bonus += 1.5  # 适度提高（从1.0）
+                    strategy_bonus += 1.5
                 elif action_type == 'Restore':
-                    strategy_bonus += 1.0  # 适度提高（从0.5）
+                    strategy_bonus += 1.0
                 elif action_type == 'Analyse':
-                    strategy_bonus += 0.8  # 适度提高（从0.5）
+                    strategy_bonus += 0.8
                     
         elif self.subnet_name == 'Enterprise':
-            # Phase 7: Enterprise子网奖励强化（适度，避免掩盖环境信号）
-            # 环境信号中等强度，适度补偿即可
+            # Enterprise子网奖励强化（适度，避免掩盖环境信号）
             if threat_level < 0.2:  # 低威胁
                 if action_type == 'Analyse':
-                    strategy_bonus += 0.5  # 适度提高（从0.3）
+                    strategy_bonus += 0.5
                 elif action_type.startswith('Decoy'):
-                    strategy_bonus += 0.4  # 适度提高（从0.2）
+                    strategy_bonus += 0.4
             elif threat_level < 0.5:  # 中等威胁
                 if action_type in ['Analyse', 'Remove']:
-                    strategy_bonus += 0.8  # 适度提高（从0.5）
+                    strategy_bonus += 0.8
                 elif action_type == 'Restore':
-                    strategy_bonus += 0.6  # 适度提高（从0.3）
+                    strategy_bonus += 0.6
             else:  # 高威胁
                 if action_type == 'Restore':
-                    strategy_bonus += 1.2  # 适度提高（从0.8）
+                    strategy_bonus += 1.2
                 elif action_type in ['Remove', 'Analyse']:
-                    strategy_bonus += 1.0  # 适度提高（从0.6）
+                    strategy_bonus += 1.0
                     
         else:  # Operational子网
-            # 高价值子网：Phase 3B保守调整
+            # 高价值子网：保守调整
             if threat_level >= 0.1:  # 高威胁（极低门槛）
                 if action_type == 'Restore':
-                    strategy_bonus += 0.30  # 最高奖励
+                    strategy_bonus += 0.30
                 elif action_type in ['Remove', 'Analyse']:
                     strategy_bonus += 0.24
                 elif action_type == 'Sleep':
@@ -528,10 +512,8 @@ class SubnetA3CExpert(nn.Module):
                     strategy_bonus += 0.08
                 # 无威胁时允许Sleep，不额外奖励或惩罚
         
-        # Phase 7: 临时关闭奖励塑造，只用环境信号！
-        # 让我们看清楚A3C是否真的在学习
-        # final_reward = (shaped_reward + strategy_bonus) * self.reward_scale
-        final_reward = shaped_reward  # 只用base_reward
+        # 当前使用环境原始奖励，不使用奖励塑造
+        final_reward = shaped_reward
         return final_reward
     
     def _get_action_type(self, action_idx):
@@ -579,7 +561,7 @@ class SimpleSelector:
         
         # 计算每个子网的威胁级别
         subnet_threats = {}
-        # ⚠️ 修复：根据Scenario2.yaml中Blue.INT.Hosts的实际顺序
+        # 根据Scenario2.yaml中Blue.INT.Hosts的实际顺序
         subnet_ranges = {
             'Enterprise': range(0, 4),    # Defender, Enterprise0-2
             'Operational': range(4, 8),   # Op_Host0-2, Op_Server0
@@ -679,8 +661,7 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
     双层结构：选择器 + 专家
     """
     
-    # Phase 9F: 简化动作集，移除Decoy
-    # 理念：统一动作集（Analyse + Remove + Restore），让MoE体现在策略差异上
+    # 动作集：统一动作集（Analyse + Remove + Restore），让MoE体现在策略差异上
     # 关键：每个子网只操作自己子网的主机
     # 
     # 动作索引规律（CybORG按主机顺序排列）:
@@ -699,13 +680,12 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
             136, 137, 138, 139    # Restore (Op_Host0-2, Op_Server0)
         ],
         'User': [
-            # Phase 9K: 移除User0动作（persistent foothold无法清除）
-            # 10, 23, 140,          # User0 - 已删除
+            # User0动作已移除（persistent foothold无法清除）
             11, 12, 13, 14,       # Analyse (User1-4)
             24, 25, 26, 27,       # Remove (User1-4)
             141, 142, 143, 144    # Restore (User1-4)
         ],
-        'Global': [0]  # Sleep（所有子网都可用），Monitor(1)已移除
+        'Global': [0]  # Sleep（所有子网都可用），Monitor(1)已移除（环境自动执行）
     }
     
     def __init__(self, use_gpu: bool = True, enable_sleep_detection: bool = False):
@@ -714,7 +694,7 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
         self.device = 'cuda' if use_gpu and torch.cuda.is_available() else 'cpu'
         
         # 子网配置
-        # ⚠️ 修复：根据Scenario2.yaml中Blue.INT.Hosts的实际顺序
+        # 根据Scenario2.yaml中Blue.INT.Hosts的实际顺序
         # Defender(0), Enterprise0-2(1-3), Op_Host0-2(4-6), Op_Server0(7), User0-4(8-12)
         self.subnet_config = {
             'Enterprise': {'host_indices': [1, 2, 3], 'value': 'Medium'},  # Defender, Enterprise0-2
@@ -729,24 +709,24 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
         self.subnet_experts = {}
         self.subnet_optimizers = {}
         
-        # 训练参数 - Phase 4A: 学习率调度
+        # 训练参数
         self.gamma = 0.99
         self.gae_lambda = 0.95
         
-        # Phase 4A: 学习率调度参数（根据动作空间大小调整）
+        # 学习率调度参数（根据动作空间大小调整）
         # 原则：动作空间越大，学习率越高（需要更快探索）
         #       子网越关键，学习率越低（需要更稳定策略）
         self.initial_lr = {
-            'User': 1e-4,           # 最大动作空间(57)，需要快速探索
-            'Enterprise': 5e-5,     # 中等动作空间(46)，平衡策略
-            'Operational': 3e-5     # 最关键子网，需要稳定精确
+            'User': 1e-4,
+            'Enterprise': 5e-5,
+            'Operational': 3e-5
         }
         self.min_lr = {
-            'User': 1e-5,           # 最终仍保持较高学习能力
-            'Enterprise': 5e-6,     # 中等
-            'Operational': 1e-6     # 最终最稳定
+            'User': 1e-5,
+            'Enterprise': 5e-6,
+            'Operational': 1e-6
         }
-        self.lr_schedule_steps = 4000  # Phase 4B: 延长学习率衰减周期
+        self.lr_schedule_steps = 4000
         
         # 统计
         self.episode_count = 0
@@ -757,11 +737,11 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
         print(f"   设备: {self.device}")
     
     def _initialize_experts(self, action_space_size):
-        """Phase 9L: 使用子网独立观察空间维度初始化专家"""
+        """使用子网独立观察空间维度初始化专家"""
         if self.subnet_experts:
             return
         
-        # Phase 9L: 子网观察空间维度
+        # 子网观察空间维度
         obs_dims = {
             'User': 20,        # 4台主机×4 + 4统计（排除User0）
             'Enterprise': 16,  # 3台主机×4 + 4统计
@@ -783,22 +763,22 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
                 self.global_to_local_action[global_idx] = (subnet_name, local_idx)
                 self.local_to_global_action[subnet_name][local_idx] = global_idx
             
-            # Phase 9L: 创建专家（传入obs_dim）
+            # 创建专家（传入obs_dim）
             expert = SubnetA3CExpert(
                 subnet_name=subnet_name,
                 host_indices=config['host_indices'],
                 action_dim=action_dim,
-                obs_dim=obs_dims[subnet_name],  # Phase 9L: 子网独立观察维度
+                obs_dim=obs_dims[subnet_name],
                 device=self.device
             )
             
             # 保存真实动作索引到专家
             expert.action_indices = subnet_actions
             
-            # Phase 5: 现在可以设置动作类型映射了
+            # 设置动作类型映射
             expert._setup_action_mapping()
             
-            # Phase 4A: 使用专家自己的学习率
+            # 使用专家自己的学习率
             optimizer = optim.Adam(expert.parameters(), lr=expert.expert_lr)
             
             self.subnet_experts[subnet_name] = expert
@@ -806,7 +786,7 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
             
     
     def get_action(self, observation, action_space):
-        """获取动作（Phase 9K及之前版本）"""
+        """获取动作"""
         self.total_steps += 1
         
         # 初始化
@@ -823,10 +803,8 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
         with torch.no_grad():
             local_action_idx, log_prob, value = expert.get_action_and_value(subnet_state)
         
-        # Phase 5修复：使用正确的映射转换为全局动作
+        # 使用正确的映射转换为全局动作
         global_action = self.local_to_global_action[selected_subnet][local_action_idx.item()]
-        
-        # Phase 9K: User0动作已从动作空间中移除，不再需要运行时过滤
         
         # 保存决策
         self.last_decision = {
@@ -843,10 +821,10 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
     
     def get_action_with_subnet_obs(self, subnet_obs, subnet_name, explore=True):
         """
-        Phase 9L: 使用子网专属观察选择动作
+        使用子网专属观察选择动作
         
         Args:
-            subnet_obs: 子网观察向量（24/16/20维）
+            subnet_obs: 子网观察向量（20/16/20维）
             subnet_name: 'User' / 'Enterprise' / 'Operational'
             explore: 是否探索（当前未使用，保留接口）
             
@@ -876,7 +854,7 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
             'subnet_state': subnet_state,
             'log_prob': log_prob,
             'value': value.item(),
-            'observation': subnet_obs  # Phase 9L: 保存子网观察
+            'observation': subnet_obs
         }
         
         return global_action
@@ -906,7 +884,7 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
                 expert.experience_buffer = []
                 expert.prev_threat_level = None  # 记录上一步威胁级别
             
-            # 应用奖励塑造 - Phase 1增强
+            # 应用奖励塑造
             threat_level = expert._assess_threat_level(self.last_decision['subnet_state'])
             prev_threat = getattr(expert, 'prev_threat_level', None)
             shaped_reward = expert.shape_reward(
@@ -928,7 +906,7 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
                 'threat_level': threat_level
             })
             
-            # 批量训练 - Phase 4A: 使用专家自己的批量大小
+            # 批量训练：使用专家自己的批量大小
             if len(expert.experience_buffer) >= expert.expert_batch_size or results.done:
                 self._train_expert(expert, self.subnet_optimizers[selected_subnet])
                 expert.experience_buffer.clear()
@@ -948,7 +926,7 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
         # 检测状态变化
         for host_idx in range(13):
             if not np.array_equal(prev_state[host_idx], current_state[host_idx]):
-                # ✅ 修复：根据Scenario2.yaml实际主机顺序
+                # 根据Scenario2.yaml实际主机顺序
                 # Defender(0), Enterprise0-2(1-3), Op_Host0-2(4-6), Op_Server0(7), User0-4(8-12)
                 if 8 <= host_idx <= 12:  # User0-4
                     return 'User'
@@ -960,7 +938,7 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
         return None
     
     def _update_learning_rate(self, expert_name, optimizer):
-        """Phase 4A: Cosine Annealing学习率调度"""
+        """Cosine Annealing学习率调度"""
         progress = min(1.0, self.episode_count / self.lr_schedule_steps)
         
         # Cosine annealing
@@ -978,7 +956,7 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
         if len(expert.experience_buffer) < 2:
             return
         
-        # Phase 4A: 更新学习率
+        # 更新学习率
         current_lr = self._update_learning_rate(expert.subnet_name, optimizer)
         
         # 准备数据
@@ -1005,19 +983,14 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
         new_log_probs = action_dist.log_prob(actions)
         
         actor_loss = -(new_log_probs * advantages.detach()).mean()
-        # Phase 7修复：使用Huber Loss，对异常值更鲁棒
-        # MSE对异常值敏感：(200-50)²=22,500
-        # Huber对异常值线性惩罚：约150
+        # 使用Huber Loss，对异常值更鲁棒
         critic_loss = F.smooth_l1_loss(current_values, returns)
         entropy_loss = -action_dist.entropy().mean()
         
-        # Phase 9K: Critic Loss weight (移除归一化后)
-        # Critic Loss ≈ 10-13, Actor Loss ≈ 0.3
-        # Phase 9L: 降低Critic Loss权重
-        # 原因：避免Critic过度主导，让Actor有更多探索空间
-        critic_loss_weight = 0.015  # 从0.5降低到0.015
+        # Critic Loss权重：避免Critic过度主导，让Actor有更多探索空间
+        critic_loss_weight = 0.015
         
-        # Phase 4A: 使用专家自己的entropy系数
+        # 使用专家自己的entropy系数
         total_loss = actor_loss + critic_loss_weight * critic_loss + expert.entropy_coef * entropy_loss
         
         # 反向传播
@@ -1047,7 +1020,7 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
             expert.total_critic_loss = 0
     
     def _compute_gae(self, rewards, values, dones):
-        """计算GAE - Phase 1优化"""
+        """计算GAE"""
         returns = torch.zeros_like(rewards)
         advantages = torch.zeros_like(rewards)
         
@@ -1067,8 +1040,8 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
             advantages[step] = gae
             returns[step] = gae + values[step]
         
-        # Phase 9C修正：减弱归一化，保留更多信号强度
-        # 原本的归一化会让advantages压缩到[-1,1]，导致梯度太小
+        # 减弱归一化，保留更多信号强度
+        # 归一化会让advantages压缩到[-1,1]，导致梯度太小
         if advantages.std() > 1e-8:
             # 只减去均值，不除以标准差
             advantages = advantages - advantages.mean()
@@ -1218,7 +1191,7 @@ class SimpleHierarchicalA3CAgent(BaseAgent):
                     expert.reward_scale = checkpoint['reward_scale']
                     expert.train_count = checkpoint.get('train_count', 0)
                     
-                    # Phase 9L: 强制统一学习率为8e-4（覆盖checkpoint中的旧值）
+                    # 统一学习率为8e-4
                     expert.expert_lr = 8e-4
                     
                     # 更新优化器的学习率

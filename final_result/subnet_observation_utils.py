@@ -1,5 +1,5 @@
 """
-子网观察空间提取工具 - Phase 9L
+子网观察空间提取工具
 将全局52维观察空间分离为子网独立观察空间
 """
 
@@ -20,7 +20,7 @@ class SubnetObservationExtractor:
     def __init__(self):
         """初始化观察提取器"""
         # 子网主机映射
-        # Phase 9K: User0被排除（Red的persistent foothold，无法防御）
+        # User0被排除（Red的persistent foothold，无法防御）
         self.subnet_hosts = {
             'User': ['User1', 'User2', 'User3', 'User4'],
             'Enterprise': ['Enterprise0', 'Enterprise1', 'Enterprise2'],

@@ -1,28 +1,22 @@
 #!/usr/bin/env python3
 """
-混合场景训练：50% B_line-30 + 50% Meander-50
-奖励重塑后的全新训练
+混合场景训练：50% B_line-50 + 50% Meander-100
 
 重要特性：
-1. ✅ 混合场景训练（B_line和Meander均衡）
-2. ✅ 统一学习率 8e-4（无调度，简单直接）
-3. ✅ Critic loss weight: 0.02
-4. ✅ 动作分布监控：每200 episode
-5. ✅ 基于子网选择分布优化训练效率
+1. 混合场景训练（B_line和Meander均衡）
+2. 统一学习率 8e-4
+3. Critic loss weight: 0.02
+4. 动作分布监控：每200 episode
+5. 基于子网选择分布优化训练效率
 
 训练配置：
-- 场景: 50% B_line-30步 + 50% Meander-50步
+- 场景: 50% B_line-50步 + 50% Meander-100步
 - Episodes: 15,000
 - 所有子网: 从零初始化
-- Learning rate: 8e-4（统一，无调度）
+- Learning rate: 8e-4
 - Critic loss weight: 0.02
 - 监控间隔: 每200 episodes
 - 保存间隔: 每500 episodes
-
-场景选择理由：
-- B_line-30: User 55.5%, Enterprise 41.4% → Enterprise/Op充分训练
-- Meander-50: 更长episode，更多Red攻击，更激烈对抗
-- 混合比例: 1:1 → 平衡训练所有子网
 """
 
 import sys
@@ -42,13 +36,12 @@ from CybORG.Agents import B_lineAgent, RedMeanderAgent
 from CybORG.Agents.Wrappers import ChallengeWrapper
 from CybORG.Shared import Results
 
-# Phase 9L组件
+# 组件导入
 from hardcoded_selector import HardcodedSelector
 from subnet_observation_utils import SubnetObservationExtractor
 from subnet_reward_utils import SubnetRewardCalculator
 from god_view_reward_utils import get_god_view_metrics, get_all_hostnames, get_action_type
 
-# 使用v2版本
 from simple_hierarchical_a3c_v2 import SimpleHierarchicalA3CAgent
 
 
@@ -349,7 +342,7 @@ class MixedScenarioTrainer:
             
             print(f"\n{subnet_name}子网 (总动作数: {total}):")
             
-            # 按动作类型分组统计（Monitor已移除）
+            # 按动作类型分组统计
             action_groups = {
                 'Sleep': 0,
                 'Analyse': 0,

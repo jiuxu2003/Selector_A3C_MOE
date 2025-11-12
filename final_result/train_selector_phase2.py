@@ -1,5 +1,5 @@
 """
-阶段2：Selector训练（基于Blue Observation）
+Selector训练（基于Blue Observation）
 
 前提：三个A3C experts已训练完成并冻结
 目标：训练selector仅基于Blue observation（52维）选择子网，最大化环境奖励
@@ -19,10 +19,10 @@ class QLearningSelector:
     """
     Q-learning Selector（基于Blue Observation）
     
-    关键改进：
+    核心特性：
     1. 输入：52维Blue observation（不是True State）
     2. 目标：最大化环境奖励（不是识别准确率）
-    3. 探索：ε-greedy + OP bonus
+    3. 探索：ε-greedy策略
     """
     
     def __init__(self, learning_rate=0.1, epsilon=0.6, epsilon_decay=0.9973, min_epsilon=0.05, gamma=0.99,
@@ -39,19 +39,18 @@ class QLearningSelector:
         self.min_epsilon = min_epsilon
         self.gamma = gamma
         
-        # 阶段性子网解锁（基于红队攻击路径）
-        self.enterprise_unlock_step = enterprise_unlock_step  # Enterprise最早可能被攻击的步数
-        self.operational_unlock_step = operational_unlock_step  # Operational最早可能被攻击的步数
+        # 阶段性子网解锁
+        self.enterprise_unlock_step = enterprise_unlock_step
+        self.operational_unlock_step = operational_unlock_step
         
-        # 方案1：奖励归一化 - 场景baseline（使用硬编码selector的真实评估结果）
-        # 来源：evaluations/mix6_UE-mixed_scenarios_final_OP-op_focus_final_100ep/results.txt
+        # 奖励归一化 - 场景baseline（使用硬编码selector的真实评估结果）
         self.scene_baselines = {
-            'B_line_30': -14.41,    # 真实评估：-14.41 (范围 [-19.20, -9.70])
-            'B_line_50': -24.94,    # 真实评估：-24.94 (范围 [-30.60, -19.90])
-            'B_line_100': -51.64,   # 真实评估：-51.64 (范围 [-59.60, -38.90])
-            'Meander_30': -10.96,   # 真实评估：-10.96 (范围 [-14.50, -7.60])
-            'Meander_50': -22.13,   # 真实评估：-22.13 (范围 [-27.80, -16.50])
-            'Meander_100': -52.13   # 真实评估：-52.13 (范围 [-62.20, -41.90])
+            'B_line_30': -14.41,
+            'B_line_50': -24.94,
+            'B_line_100': -51.64,
+            'Meander_30': -10.96,
+            'Meander_50': -22.13,
+            'Meander_100': -52.13
         }
         
         # 动态更新baseline（滑动平均）
@@ -69,7 +68,7 @@ class QLearningSelector:
         # 统计（累计）
         self.selection_counts = {'User': 0, 'Enterprise': 0, 'Operational': 0}
         self.total_selections = 0
-        self.phase_locked_counts = 0  # 因阶段锁定而强制选User的次数
+        self.phase_locked_counts = 0  # 统计信息
         
         # 滑动窗口统计（最近N次选择）
         self.recent_selections = []  # 存储最近的选择记录
@@ -82,12 +81,7 @@ class QLearningSelector:
     
     def get_state_key(self, blue_obs_52dim, scenario='B_line', max_steps=100, current_step=0):
         """
-        从52维Blue observation构造状态键（极简版：阶段+威胁）
-        
-        关键改进：
-        - 移除场景和配置（通过分场景训练解决）
-        - 移除步数分桶（阶段信息已足够）
-        - 仅保留阶段编码（early/mid/late）+ 威胁等级
+        从52维Blue observation构造状态键（阶段+威胁）
         
         状态表示：阶段_威胁等级
         返回格式："mid_U2_E1_O0" 表示中期，威胁User=2, Ent=1, Op=0
@@ -95,12 +89,12 @@ class QLearningSelector:
         """
         obs_reshaped = blue_obs_52dim.reshape(13, 4)
         
-        # 计算威胁等级（改进：分级而非简单累加）
+        # 计算威胁等级（分级）
         subnet_threats = {}
         for subnet_name, host_indices in self.subnet_host_indices.items():
             threat_score = 0
             for idx in host_indices:
-                # **关键修复**：排除User0（idx=8），与hardcoded selector保持一致
+                # 排除User0（idx=8），与hardcoded selector保持一致
                 # User0是Red的永久入口点，不可防御
                 if idx == 8:  # User0
                     continue
@@ -123,8 +117,7 @@ class QLearningSelector:
                 elif comp_bits[0] == 1 and comp_bits[1] == 0:  # Unknown [1,0]
                     threat_score += 1
             
-            # 威胁分级（折中：4级，平衡泛化和区分度）
-            # 0-3的等级在学习效率和区分能力间取得平衡
+            # 威胁分级（4级，平衡泛化和区分度）
             if threat_score == 0:
                 level = 0  # 无威胁
             elif threat_score <= 2:
@@ -136,8 +129,7 @@ class QLearningSelector:
             
             subnet_threats[subnet_name] = level
         
-        # 阶段编码（基于绝对步数，足够表达时序信息）
-        # 不需要步数分桶 - 阶段已经包含了关键时序特征
+        # 阶段编码（基于绝对步数）
         if current_step < 10:
             phase = 'early'    # 0-9步：Red初始入侵
         elif current_step < 20:
@@ -145,8 +137,7 @@ class QLearningSelector:
         else:
             phase = 'late'     # 20+步：深入攻击
         
-        # 极简状态键：阶段_威胁等级（移除步数分桶）
-        # 优势：状态空间从2112减少到192（每场景），更容易充分探索
+        # 状态键：阶段_威胁等级
         state_key = (f"{phase}_"
                     f"U{subnet_threats['User']}_"
                     f"E{subnet_threats['Enterprise']}_"
@@ -191,9 +182,9 @@ class QLearningSelector:
     
     def select_subnet(self, blue_obs_52dim, scenario='B_line', max_steps=100, current_step=0):
         """
-        选择子网（ε-greedy策略 + OP bonus）
+        选择子网（ε-greedy策略）
         
-        已移除阶段锁定：所有子网从第0步即可选择
+        所有子网从第0步即可选择
         让Q-learning通过奖励信号自己学习何时选择哪个子网
         
         Args:
@@ -207,12 +198,12 @@ class QLearningSelector:
         """
         state_key = self.get_state_key(blue_obs_52dim, scenario, max_steps, current_step)
         
-        # 所有子网始终可选（阶段锁定已移除）
+        # 所有子网始终可选
         available_subnets = ['User', 'Enterprise', 'Operational']
         
         # ε-greedy探索（均匀探索，让Q值自然学习）
         if np.random.random() < self.epsilon:
-            # 均匀随机选择（移除OP bonus，因为实际威胁分布不均）
+            # 均匀随机选择
             selected = np.random.choice(available_subnets)
         else:
             # 贪心选择（在可选子网中选最大Q值）
@@ -244,7 +235,7 @@ class QLearningSelector:
     
     def normalize_reward(self, raw_reward, scenario='B_line', max_steps=100):
         """
-        方案1：奖励归一化
+        奖励归一化
         
         将绝对奖励转为相对改进，解决不同场景奖励尺度冲突
         
@@ -285,25 +276,15 @@ class QLearningSelector:
     
     def update(self, state_key, action, raw_reward, next_state_key, done, scenario='B_line', max_steps=100, current_step=0):
         """
-        Q-learning更新（带时序奖励加权）
+        Q-learning更新
         
         Q(s,a) ← Q(s,a) + α * [r + γ * max_a' Q(s',a') - Q(s,a)]
-        
-        关键改进：时序奖励加权
-        - 早期（0-10步）防御User/Enterprise：权重×2.0
-        - 中期（11-20步）防御：权重×1.5
-        - 后期（20+步）：正常权重
-        - 后期Op威胁出现：额外惩罚-20（说明前期防御失败）
         
         Args:
             raw_reward: 原始环境奖励
             current_step: 当前步数
         """
-        # 直接使用原始奖励（移除时序加权，让Q-learning自然学习）
-        # 时序加权虽然理论上合理，但实践中可能干扰学习：
-        # 1. 负奖励也被放大（早期失败 → -10 × 2 = -20）
-        # 2. Op惩罚过重（成功防御 → +8 - 20 = -12）
-        # 3. 让我们先用简单的原始奖励，看Q-learning能否自然学到正确策略
+        # 直接使用原始奖励
         reward = raw_reward
         
         current_q = self.q_table[state_key][action]
@@ -396,7 +377,7 @@ class QLearningSelector:
 
 class SelectorPhase2Trainer:
     """
-    阶段2训练器：冻结Experts，训练Selector
+    训练器：冻结Experts，训练Selector
     """
     
     def __init__(self):
@@ -471,7 +452,7 @@ class SelectorPhase2Trainer:
         """
         从True State判断当前哪个子网威胁最大
         
-        **关键修复**：直接使用hardcoded_selector的完整逻辑
+        直接使用hardcoded_selector的完整逻辑
         包括特权访问、可疑进程和子网权重
         
         Args:
@@ -589,25 +570,25 @@ class SelectorPhase2Trainer:
             observation = next_observation
             step += 1
         
-        # 6. 训练：更新Q-table（带时序奖励加权）
+        # 训练：更新Q-table
         if not eval_mode:
             for t in trajectory:
                 self.selector.update(
                     t['state_key'],
                     t['action'],
-                    t['reward'],  # 原始奖励，update内部会进行时序加权
+                    t['reward'],
                     t['next_state_key'],
                     t['done'],
                     t['scenario'],
                     t['max_steps'],
-                    t['current_step']  # 传入步数用于时序加权
+                    t['current_step']
                 )
         
         return episode_reward, step, subnet_selections
     
     def train(self, total_episodes=40000, eval_interval=200, save_interval=2000):
         """
-        训练selector（分阶段课程学习）
+        训练selector
         
         Args:
             total_episodes: 总训练轮数（将被分阶段配置覆盖）
@@ -622,25 +603,25 @@ class SelectorPhase2Trainer:
         print("  - Q-learning做预测 → 学习模仿hardcoded的决策")
         print("  - 一致性奖励：预测对+10，预测错-10")
         print("")
-        print("状态空间：阶段_威胁等级 (极简版)")
+        print("状态空间：阶段_威胁等级")
         print("预计状态数：3阶段 x 4^3威胁 = 192个状态 (每场景)")
         print("  - 阶段: early(0-9步), mid(10-19步), late(20+步)")
         print("  - 威胁: 4级(0=无, 1=轻微, 2=中等, 3=严重)")
         print("  - 示例: 'mid_U2_E1_O0' = 中期,User威胁2,Ent威胁1,Op无威胁")
         print("")
-        print("训练策略（优化版）：")
-        print("  1. **两个独立的selector** - 各自针对一种攻击模式")
+        print("训练策略：")
+        print("  1. 两个独立的selector - 各自针对一种攻击模式")
         print("  2. B_line selector: 100,000轮 (30/50/100 → 30k/30k/40k)")
         print("  3. Meander selector: 100,000轮 (30/50/100 → 30k/30k/40k，从零开始)")
         print("  4. 探索率独立衰减 → 每个selector: 0.8→0.1 (100k轮)")
-        print("  5. 子网锁定移除 → 从第0步即可选择所有子网")
+        print("  5. 所有子网从第0步即可选择")
         print("")
         print("总训练轮数：200,000 (2 selectors × 100k)")
         print("探索率衰减：0.9982 (每100轮)")
         print("=" * 80)
         
         # 双Selector训练配置（每个100000轮，独立训练）
-        training_phases = [
+        training_configs = [
             {
                 'selector_name': 'B_line',
                 'description': 'B_line Selector训练（线性攻击专家）',
@@ -662,30 +643,30 @@ class SelectorPhase2Trainer:
         ]
         
         # 训练两个独立的selector
-        for phase_idx, phase in enumerate(training_phases, 1):
-            selector_name = phase['selector_name']
+        for config_idx, config in enumerate(training_configs, 1):
+            selector_name = config['selector_name']
             
             print(f"\n{'='*100}")
-            print(f"开始训练 {selector_name} Selector ({phase['description']})")
+            print(f"开始训练 {selector_name} Selector ({config['description']})")
             print(f"{'='*100}")
             
             # 初始化新的selector（探索率独立重置）
             self.selector = QLearningSelector(
                 learning_rate=0.1,
-                epsilon=0.8,           # 从0.8开始（增加初始探索）
+                epsilon=0.8,
                 epsilon_decay=0.9982,  # 100000轮衰减到0.1
-                min_epsilon=0.1,       # 最终保留10%探索
+                min_epsilon=0.1,
                 gamma=0.99,
-                enterprise_unlock_step=0,   # 移除锁定
-                operational_unlock_step=0   # 移除锁定
+                enterprise_unlock_step=0,
+                operational_unlock_step=0
             )
-            print(f"[初始化] 新Selector - 探索率ε={self.selector.epsilon}, 衰减率={self.selector.epsilon_decay}, 子网锁定已移除")
+            print(f"[初始化] 新Selector - 探索率ε={self.selector.epsilon}, 衰减率={self.selector.epsilon_decay}")
             
-            phase_episode_rewards = []
-            phase_episode = 0  # 当前phase内的episode计数
+            config_episode_rewards = []
+            config_episode = 0  # 当前配置内的episode计数
             
             # 训练当前selector的所有阶段
-            for stage_idx, stage in enumerate(phase['stages'], 1):
+            for stage_idx, stage in enumerate(config['stages'], 1):
                 scenario = stage['scenario']
                 max_steps = stage['max_steps']
                 stage_episodes = stage['episodes']
@@ -707,21 +688,21 @@ class SelectorPhase2Trainer:
                         consistency_weight=1.0  # 不需要衰减，纯一致性
                     )
                     stage_episode_rewards.append(ep_reward)
-                    phase_episode_rewards.append(ep_reward)
+                    config_episode_rewards.append(ep_reward)
                     
-                    phase_episode += 1
+                    config_episode += 1
                     
                     # 每100轮衰减探索率
-                    if phase_episode % 100 == 0:
+                    if config_episode % 100 == 0:
                         self.selector.decay_epsilon()
                     
                     # 简单进度提示（每50轮）
-                    if phase_episode % 50 == 0 and phase_episode % eval_interval != 0:
-                        print(f"[进度] [{selector_name}] Episode {phase_episode}/45000 (阶段{stage_idx}: {episode+1}/{stage_episodes}) - 探索率: {self.selector.epsilon:.3f}")
+                    if config_episode % 50 == 0 and config_episode % eval_interval != 0:
+                        print(f"[进度] [{selector_name}] Episode {config_episode}/100000 (阶段{stage_idx}: {episode+1}/{stage_episodes}) - 探索率: {self.selector.epsilon:.3f}")
                     
                     # 详细统计（每eval_interval轮）
-                    if phase_episode % eval_interval == 0:
-                        recent_rewards = phase_episode_rewards[-eval_interval:]
+                    if config_episode % eval_interval == 0:
+                        recent_rewards = config_episode_rewards[-eval_interval:]
                         avg_reward = mean(recent_rewards)
                         std_reward = np.std(recent_rewards)
                         min_reward = min(recent_rewards)
@@ -736,19 +717,19 @@ class SelectorPhase2Trainer:
                         # 一致率统计
                         consistency_stats = self.selector.get_consistency_rate()
                         
-                        print(f"\n[{selector_name}] Episode {phase_episode}/45000 (阶段{stage_idx}: {episode+1}/{stage_episodes})")
-                        print(f"  环境奖励: {avg_reward:.2f} ± {std_reward:.2f} (范围: [{min_reward:.2f}, {max_reward:.2f}]) [真实防御效果]")
+                        print(f"\n[{selector_name}] Episode {config_episode}/100000 (阶段{stage_idx}: {episode+1}/{stage_episodes})")
+                        print(f"  环境奖励: {avg_reward:.2f} ± {std_reward:.2f} (范围: [{min_reward:.2f}, {max_reward:.2f}])")
                         print(f"  Q表大小: {q_table_size}个状态")
                         print(f"  探索率ε: {self.selector.epsilon:.3f}")
-                        print(f"  一致率: {consistency_stats['recent']:.1f}% (最近{consistency_stats['count']}次) | 总体: {consistency_stats['total']:.1f}% [Q训练用+10/-10]")
+                        print(f"  一致率: {consistency_stats['recent']:.1f}% (最近{consistency_stats['count']}次) | 总体: {consistency_stats['total']:.1f}%")
                         print(f"  选择分布(最近{recent_stats['total']}轮): "
                               f"User {recent_stats['User']['percentage']:.1f}% | "
                               f"Ent {recent_stats['Enterprise']['percentage']:.1f}% | "
                               f"Op {recent_stats['Operational']['percentage']:.1f}%")
                     
                     # 保存checkpoint
-                    if phase_episode % save_interval == 0:
-                        self.save_checkpoint(f"{selector_name}_selector_ep{phase_episode}")
+                    if config_episode % save_interval == 0:
+                        self.save_checkpoint(f"{selector_name}_selector_ep{config_episode}")
                 
                 # 当前stage完成统计
                 stage_avg = mean(stage_episode_rewards)
@@ -759,14 +740,14 @@ class SelectorPhase2Trainer:
                 print(f"  当前探索率: {self.selector.epsilon:.3f}")
             
             # 当前selector训练完成
-            phase_avg = mean(phase_episode_rewards)
-            phase_std = np.std(phase_episode_rewards)
+            config_avg = mean(config_episode_rewards)
+            config_std = np.std(config_episode_rewards)
             
             print(f"\n{'='*100}")
             print(f"[完成] {selector_name} Selector训练完成！")
             print(f"{'='*100}")
-            print(f"  总训练轮数: {phase_episode}")
-            print(f"  平均奖励: {phase_avg:.2f} ± {phase_std:.2f}")
+            print(f"  总训练轮数: {config_episode}")
+            print(f"  平均奖励: {config_avg:.2f} ± {config_std:.2f}")
             print(f"  最终Q表大小: {len(self.selector.q_table)}个状态")
             print(f"  最终探索率: {self.selector.epsilon:.3f}")
             

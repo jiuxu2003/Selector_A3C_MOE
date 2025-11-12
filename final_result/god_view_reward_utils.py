@@ -1,5 +1,5 @@
 """
-Phase 8E: 基于上帝视角的奖励塑形工具
+基于上帝视角的奖励塑形工具
 使用env.get_agent_state('True')获取完整真实状态
 """
 
@@ -135,17 +135,17 @@ def shape_reward_with_god_view(action, action_type, env, prev_metrics_dict, last
                 for h in all_hosts
             )
             
-            # Phase 9H: 提高惩罚，避免Sleep/Monitor
+            # 提高惩罚，避免Sleep/Monitor
             if total_sessions_after > total_sessions_before:
                 return -1.0  # 威胁扩散时严重惩罚
             else:
                 return -0.3  # 浪费时间
         
         elif 'Decoy' in action_type:
-            return 0.4  # 从2.0降到0.4（预防性诱捕）
+            return 0.4  # 预防性诱捕
         
         else:
-            return -0.4  # 从-2.0降到-0.4（其他无目标动作）
+            return -0.4  # 其他无目标动作
     
     # === 针对特定主机的动作 ===
     
@@ -162,7 +162,7 @@ def shape_reward_with_god_view(action, action_type, env, prev_metrics_dict, last
     
     # === Restore 动作 ===
     if action_type == 'Restore':
-        # Phase 9K: 🎯 只奖励"降低权限"
+        # 只奖励"降低权限"
         # 核心逻辑：Restore的价值在于清除权限提升，不是清除session
         # 只有当主机之前有权限提升时，Restore才有意义
         
@@ -180,46 +180,41 @@ def shape_reward_with_god_view(action, action_type, env, prev_metrics_dict, last
             bonus = sessions_cleared * 0.8
             return base_reward + bonus  # 6.0-8.4分
         
-        # ⚠️ 关键：在没有权限提升的主机上Restore → 严厉惩罚
+        # 在没有权限提升的主机上Restore → 严厉惩罚
         # 如果主机本来就没有权限提升，Restore是浪费（应该用Remove）
         if prev['access_level'] == 'None':
             return -4.0  # 严厉惩罚：主机没有权限提升就Restore
         
         # Restore尝试但效果不明显（权限未降低）
-        return -1.0  # 提高惩罚：Restore无效果
+        return -1.0  # Restore无效果
     
     # === Remove 动作 ===
     elif action_type == 'Remove':
-        # Phase 9K: User0动作已从动作空间移除，不再需要特殊处理
-        
-        # Phase 9K: 提高Remove奖励，鼓励主动清除
         # 清除了Red session
         sessions_removed = prev['red_session_count'] - curr['red_session_count']
         if sessions_removed > 0:
-            base_reward = 5.0  # 提高from 3.2
-            bonus = sessions_removed * 1.0  # 提高from 0.8
+            base_reward = 5.0
+            bonus = sessions_removed * 1.0
             return base_reward + bonus  # 5.0-8.0分
         
         # 清除了恶意进程
         processes_removed = prev['malware_processes'] - curr['malware_processes']
         if processes_removed > 0:
-            return 4.0  # 提高from 2.8
+            return 4.0
         
         # Remove无法降低Privileged权限（只能清除user-level shell）
-        # 移除这个不合理的奖励
-        # if prev['access_level'] == 'Privileged' and curr['access_level'] == 'User':
-        #     return 1.2  # 错误！Remove做不到这个
+        # 注意：Remove无法降低Privileged权限
         
         # 无效Remove（目标本来就干净）
         if not prev['has_red_session'] and prev['malware_processes'] == 0:
-            return -0.5  # 保持不变
+            return -0.5
         
         # Remove尝试但无效（包括对privileged shell无效）
-        return -0.3  # 保持不变
+        return -0.3
     
     # === Analyse 动作 ===
     elif action_type == 'Analyse':
-        # Phase 9J: 🎯 信息增量逻辑 - 只奖励"新信息"
+        # 信息增量逻辑 - 只奖励"新信息"
         # 奖励条件：
         # 1. 首次Analyse该主机 → 根据威胁给奖励
         # 2. 重复Analyse，但发现新威胁/权限提升 → 给奖励
@@ -276,8 +271,7 @@ def shape_reward_with_god_view(action, action_type, env, prev_metrics_dict, last
             
             # 无信息增量 → 惩罚浪费
             else:
-                # Phase 9K: 提高重复Analyse惩罚
-                return -1.0  # 提高from -0.5，强烈阻止重复扫描
+                return -1.0  # 强烈阻止重复扫描
     
     # === 其他动作 ===
     else:
